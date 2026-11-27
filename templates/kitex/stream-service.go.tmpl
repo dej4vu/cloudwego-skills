@@ -1,0 +1,47 @@
+// 模板：Kitex server-streaming 方法的 service。复制到 app/{{svc}}/biz/service/{{method}}.go 后替换 {{...}}。
+// 来源：fixtures/stream-sse/app/echo/biz/service/echo_stream.go
+//
+// 要点：
+//   - Run 第一行必须是 s.ctx = stream.Context()：生成的 handler 骨架传的是 context.Background()
+//   - 流一旦建立，业务失败不能再走 RPC error，一律发 error 事件后 return nil
+//   - 只有 stream.Send 本身失败（对端已断开）才返回非 nil error
+//   - 零值有意义的字段（如 partIndex=0）要显式写出来
+package service
+
+import (
+	"context"
+
+	{{pkg}} "{{module}}/rpc_gen/kitex_gen/{{pkg}}"
+)
+
+type {{Method}}Service struct {
+	ctx context.Context
+}
+
+// New{{Method}}Service new {{Method}}Service
+func New{{Method}}Service(ctx context.Context) *{{Method}}Service {
+	return &{{Method}}Service{ctx: ctx}
+}
+
+// Run {{一句话说明}}。所有业务失败都编码为 error 事件后返回 nil。
+func (s *{{Method}}Service) Run(req *{{pkg}}.{{Method}}Req, stream {{pkg}}.{{Service}}_{{Method}}Server) error {
+	// 生成的 handler 骨架不透传请求 ctx；连接生命周期以 stream.Context() 为准。
+	s.ctx = stream.Context()
+
+	seq := int64(0)
+	_ = seq
+	{{business}}
+	return nil
+}
+
+// sendErrorEvent 在流上发送业务错误事件；发送成功后返回 nil。
+func (s *{{Method}}Service) sendErrorEvent(
+	stream {{pkg}}.{{Service}}_{{Method}}Server, replyID string, seq int64, code int32, message string,
+) error {
+	if err := stream.Send(&{{pkg}}.{{Method}}Resp{
+		Type: "error", ReplyId: replyID, Seq: seq + 1, Code: code, Message: message,
+	}); err != nil {
+		return err
+	}
+	return nil
+}

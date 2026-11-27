@@ -1,0 +1,37 @@
+syntax = "proto3";
+
+package echo;
+option go_package = "/echo";
+
+// 回声服务
+service EchoService {
+  // EchoStream 逐片回显输入文本（server-streaming）
+  rpc EchoStream(EchoReq) returns (stream EchoResp) {}
+}
+
+message EchoReq {
+  // 要回显的文本
+  string text = 1;
+  // 每片字符数，默认 4
+  int32 chunkSize = 2;
+  // 模拟错误：fail_send 在发到一半时失败；fail_arg 参数非法
+  string fault = 3;
+}
+
+// EchoResp 流式事件。type 区分事件种类，seq 从 1 单调递增。
+message EchoResp {
+  // 事件类型：delta / done / error
+  string type = 1;
+  // 本轮回复 ID
+  string replyId = 2;
+  // 分片序号，从 1 开始
+  int64 seq = 3;
+  // 文本分片
+  string text = 4;
+  // 分段下标，0 是合法值
+  int32 partIndex = 5;
+  // 仅 error 事件：业务错误码
+  int32 code = 6;
+  // 仅 error 事件：错误描述
+  string message = 7;
+}

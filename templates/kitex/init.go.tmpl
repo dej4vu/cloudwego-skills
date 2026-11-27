@@ -1,0 +1,44 @@
+// 模板：Kitex 服务的依赖装配。复制到 app/{{svc}}/biz/service/init.go 后替换 {{...}}。
+// 来源：fixtures/kitex-greet/app/greet/biz/service/init.go
+//
+// 要点：
+//   - 依赖在服务启动前由 main 调用 InitDeps 装配一次，不在每个请求里装配
+//   - 窄接口：service 只依赖它用到的方法面，便于注入替身
+//   - 未初始化就使用直接 panic（fail-fast），不要静默降级
+//   - ShutdownDeps 可重复调用，注册到 server.RegisterShutdownHook
+package service
+
+// {{dep}} 是 service 依赖的下游面；只声明用到的方法。
+type {{dep}} interface {
+	{{method}}({{args}}) {{ret}}
+}
+
+// dependencies 由 InitDeps 在服务启动前装配一次。
+type dependencies struct {
+	{{dep}} {{dep}}
+}
+
+var deps *dependencies
+
+// d 返回已装配依赖；未初始化时快速失败。
+func d() *dependencies {
+	if deps == nil {
+		panic("{{svc}} service deps not initialized: call service.InitDeps before serving requests")
+	}
+	return deps
+}
+
+// InitDeps 装配业务依赖；重复调用直接 panic。
+func InitDeps() {
+	if deps != nil {
+		panic("{{svc}} service.InitDeps called more than once")
+	}
+	deps = &dependencies{
+		{{dep}}: new{{Dep}}(/* 从配置 / 连接池构造 */),
+	}
+}
+
+// ShutdownDeps 释放后台资源；可重复调用。
+func ShutdownDeps() {
+	deps = nil
+}

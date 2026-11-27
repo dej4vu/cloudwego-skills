@@ -1,0 +1,32 @@
+syntax = "proto3";
+
+package gw.echo;
+
+import "api.proto";
+import "google/api/annotations.proto";
+import "openapiv3/annotations.proto";
+
+option go_package = "/gw/echo";
+
+// 回声网关
+service EchoService {
+  // 流式回显（网关 IDL 是普通 unary，SSE 由 handler 桥接实现）
+  rpc EchoStream(EchoReq) returns (EchoResp) {
+    option (api.post) = "v1/echo/stream";
+    option (google.api.http) = { post: "/v1/echo/stream" body: "*" };
+    option (openapi.v3.operation) = { summary: "流式回显" };
+  }
+}
+
+message EchoReq {
+  // 要回显的文本
+  string text = 1;
+  // 模拟错误：fail_send 在发到一半时失败
+  string fault = 2;
+}
+
+// EchoResp 网关 IDL 里只是形式上的响应类型：SSE 的事件由 handler 桥接直接写出。
+message EchoResp {
+  // 文本分片
+  string text = 1;
+}

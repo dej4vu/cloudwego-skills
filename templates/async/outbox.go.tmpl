@@ -1,0 +1,49 @@
+// 模板：事务性 outbox 的 worker 与幂等入账。
+// 来源：fixtures/outbox-idempotency/outbox.go（那里的实现带完整注释与 10 个测试，可直接复制整文件）
+//
+// 要点：
+//   - 业务数据与 outbox 行在同一个数据库事务里落库，不在事务外同步发消息
+//   - worker 对存储 / 消息系统只依赖窄接口，便于用 fake 测每条路径
+//   - 投递成功才 MarkSent；失败按"第 n 次重试等 n*Step"退避，超过 MaxRetry 进 MarkFailed（死信）
+//   - Stop 可重复调用，等待当前批次处理完
+//   - 消费端用幂等键去重：同键同内容跳过，同键不同内容报 ErrConflict
+package outbox
+
+import (
+	"context"
+	"time"
+)
+
+// Config 是 worker 参数。零值字段取默认。
+type Config struct {
+	Interval    time.Duration // 轮询间隔，默认 1s
+	BatchSize   int           // 每批条数，默认 100
+	InitialWait time.Duration // 首次投递前的等待，默认 1s
+	MaxRetry    int           // 最大重试次数，默认 10
+	RetryStep   time.Duration // 退避步长，默认 30s；第 n 次重试等 n*Step
+}
+
+// Store 是 worker 对存储的窄接口：只声明 worker 用到的四个操作。
+type Store interface {
+	ListDue(ctx context.Context, now time.Time, limit int) ([]*Item, error)
+	MarkSent(ctx context.Context, id int64) error
+	MarkFailed(ctx context.Context, id int64, retry int) error
+	ScheduleRetry(ctx context.Context, id int64, retry int, next time.Time) error
+}
+
+// Publisher 是 worker 对消息系统的窄接口。
+type Publisher interface {
+	Publish(ctx context.Context, item *Item) error
+	Close() error
+}
+
+// ErrConflict 表示同一幂等键已存在但内容不同。
+var ErrConflict = errors.New("idempotency conflict")
+
+// ApplyOnce 用幂等键保证同一笔业务只入账一次。
+//   - 键不存在：写入，返回 (true, nil)
+//   - 键存在且内容相同：跳过，返回 (false, nil)
+//   - 键存在但内容不同：返回 (false, ErrConflict)
+func ApplyOnce(ledger map[string]LedgerEntry, e LedgerEntry) (bool, error) {
+	{{body}}
+}

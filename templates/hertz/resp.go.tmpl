@@ -1,0 +1,55 @@
+// 模板：网关统一响应信封。复制到 app/{{gw}}/biz/utils/resp.go 后替换 {{...}}。
+// 来源：fixtures/hertz-greet/app/apigw/biz/utils/resp.go
+//
+// 要点：
+//   - 生成的 utils/resp.go 是桩，这个文件由项目维护
+//   - HTTP 状态恒为 200，业务结果在 code 里；生成的 handler 传入的状态码参数被忽略
+//   - 错误映射顺序：RPC 业务错误（kerrors）→ 本地业务错误（errno）→ 兜底参数错误
+package utils
+
+import (
+	"context"
+	"errors"
+	"net/http"
+	"time"
+
+	"github.com/cloudwego/hertz/pkg/app"
+	"github.com/cloudwego/hertz/pkg/common/hlog"
+	"github.com/cloudwego/kitex/pkg/kerrors"
+
+	"{{module}}/app/{{gw}}/biz/errno"
+)
+
+// Response 是网关统一的响应信封。HTTP 状态恒为 200，业务结果在 Code 里。
+type Response struct {
+	Code      int    `json:"code"`
+	Msg       string `json:"msg"`
+	Data      any    `json:"data"`
+	Timestamp int64  `json:"timestamp"`
+}
+
+// SendSuccessResponse 把 data 包成 code=0 的信封。
+func SendSuccessResponse(_ context.Context, c *app.RequestContext, _ int, data any) {
+	c.JSON(http.StatusOK, Response{Code: 0, Msg: "OK", Data: data, Timestamp: time.Now().Unix()})
+}
+
+// SendErrResponse 按三层顺序映射错误：RPC 业务错误 → 本地业务错误 → 兜底参数错误。
+// 第三个参数（生成 handler 传入的 HTTP 状态）被忽略，状态码由本函数统一决定。
+func SendErrResponse(ctx context.Context, c *app.RequestContext, _ int, err error) {
+	if bizErr, ok := kerrors.FromBizStatusError(err); ok {
+		hlog.CtxErrorf(ctx, "rpc business error: code=%d message=%s", bizErr.BizStatusCode(), bizErr.BizMessage())
+		sendError(c, int(bizErr.BizStatusCode()), bizErr.BizMessage())
+		return
+	}
+	var bizErr errno.Err
+	if errors.As(err, &bizErr) {
+		sendError(c, int(bizErr), bizErr.String())
+		return
+	}
+	hlog.CtxErrorf(ctx, "gateway error: %v", err)
+	sendError(c, int(errno.Err_Params), "请求参数不合法")
+}
+
+func sendError(c *app.RequestContext, code int, message string) {
+	c.JSON(http.StatusOK, Response{Code: code, Msg: message, Timestamp: time.Now().Unix()})
+}

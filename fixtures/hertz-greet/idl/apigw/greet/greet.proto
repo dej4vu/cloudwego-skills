@@ -1,0 +1,47 @@
+syntax = "proto3";
+
+package gw.greet;
+
+import "api.proto";
+import "google/api/annotations.proto";
+import "openapiv3/annotations.proto";
+
+option go_package = "/gw/greet";
+
+// 用户端问候网关
+service GreetService {
+  // 打招呼
+  rpc Hello(HelloReq) returns (HelloResp) {
+    option (api.post) = "v1/greet/hello";
+    option (google.api.http) = { post: "/v1/greet/hello" body: "*" };
+    option (openapi.v3.operation) = { summary: "打招呼" };
+  }
+  // 需要登录的端点，用于验证认证与业务错误映射
+  rpc HelloMe(HelloMeReq) returns (HelloMeResp) {
+    option (api.post) = "v1/greet/me";
+    option (google.api.http) = { post: "/v1/greet/me" body: "*" };
+    option (openapi.v3.operation) = { summary: "打招呼（需登录）" };
+  }
+}
+
+message HelloReq {
+  // 名字
+  string name = 1;
+  // 语言，默认 en
+  string lang = 2;
+}
+
+message HelloResp {
+  // 问候语
+  string message = 1;
+}
+
+message HelloMeReq {
+}
+
+message HelloMeResp {
+  // 已验证的用户 ID
+  int64 userId = 1;
+  // 问候语
+  string message = 2;
+}

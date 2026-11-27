@@ -1,0 +1,63 @@
+// 模板：流式端点的 IDL。RPC 侧用 server-streaming，网关侧仍是普通 unary。
+// 来源：fixtures/stream-sse/idl/rpc/echo/echo.proto、fixtures/stream-sse/idl/apigw/echo/echo.proto
+//
+// 要点：
+//   - RPC 侧：returns (stream XxxResp)，这是唯一声明流式语义的地方
+//   - 网关侧：returns (XxxResp) 普通 unary，流式由 handler 桥接实现
+//   - 事件消息必须带 type / replyId / seq 三个字段，编号固定 1 / 2 / 3
+//   - seq 从 1 单调递增；type 取 transcript / delta / audio / done / error
+
+// ---- RPC 侧：idl/rpc/{{pkg}}/{{pkg}}.proto ----
+syntax = "proto3";
+
+package {{pkg}};
+option go_package = "/{{pkg}}";
+
+service {{Service}} {
+  // {{Method}} {{一句话说明}}（server-streaming）
+  rpc {{Method}}({{Method}}Req) returns (stream {{Method}}Resp) {}
+}
+
+message {{Method}}Req {
+  // {{字段说明}}
+  string text = 1;
+}
+
+// {{Method}}Resp 流式事件。type 区分事件种类，seq 从 1 单调递增。
+message {{Method}}Resp {
+  // 事件类型：transcript / delta / audio / done / error
+  string type = 1;
+  // 本轮回复 ID，同一轮的所有事件相同
+  string replyId = 2;
+  // 分片序号，从 1 开始
+  int64 seq = 3;
+  // 文本分片
+  string text = 4;
+  // 分段下标，0 是合法值
+  int32 partIndex = 5;
+  // 仅 error 事件：业务错误码
+  int32 code = 6;
+  // 仅 error 事件：错误描述
+  string message = 7;
+}
+
+// ---- 网关侧：idl/apigw/{{pkg}}/{{pkg}}.proto（只列 service 段，文件头同 gateway.proto.tmpl） ----
+service {{Service}} {
+  // {{一句话说明}}（网关 IDL 是普通 unary，SSE 由 handler 桥接实现）
+  rpc {{Method}}({{Method}}Req) returns ({{Method}}Resp) {
+    option (api.post) = "v1/{{pkg}}/stream";
+    option (google.api.http) = { post: "/v1/{{pkg}}/stream" body: "*" };
+    option (openapi.v3.operation) = { summary: "{{一句话说明}}" };
+  }
+}
+
+message {{Method}}Req {
+  // {{字段说明}}
+  string text = 1;
+}
+
+// {{Method}}Resp 网关 IDL 里只是形式上的响应类型：SSE 的事件由 handler 桥接直接写出。
+message {{Method}}Resp {
+  // 文本分片
+  string text = 1;
+}

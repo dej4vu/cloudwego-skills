@@ -1,0 +1,24 @@
+syntax = "proto3";
+
+package greet;
+option go_package = "/greet";
+
+// 问候服务
+service GreetService {
+  // 打招呼（unary）
+  rpc Hello(HelloReq) returns (HelloResp) {}
+}
+
+message HelloReq {
+  // 名字
+  string name = 1;
+  // 语言，默认 zh
+  string lang = 2;
+}
+
+message HelloResp {
+  // 问候语
+  string message = 1;
+  // 处理时使用的语言
+  string lang = 2;
+}

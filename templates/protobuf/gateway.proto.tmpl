@@ -1,0 +1,41 @@
+// 模板：网关端点的 IDL 注解片段。每新增一个端点，把下面三段补到对应的 .proto 里。
+// 来源：fixtures/hertz-greet/idl/apigw/greet/greet.proto
+//
+// 要点：
+//   - 网关 IDL 一个端点要同时写三个注解：api.post（hz 路由）、google.api.http（OpenAPI）、openapi.v3.operation（文档）
+//   - 一律 POST + body "*"，不要用 GET 传业务参数
+//   - 方法名、消息名用单数；URL 可以用复数
+//   - 字段编号只增不改不复用；删字段要 reserved
+//   - 流式端点在网关 IDL 里是普通 unary，SSE 由 handler 桥接实现
+
+// ---- 1. 文件头：固定三个 import，api.proto 由仓库自带 ----
+syntax = "proto3";
+
+package gw.{{pkg}};
+
+import "api.proto";
+import "google/api/annotations.proto";
+import "openapiv3/annotations.proto";
+
+option go_package = "/gw/{{pkg}}";
+
+// {{一句话说明}}网关
+service {{Service}} {
+  // ---- 2. 普通端点 ----
+  rpc {{Method}}({{Method}}Req) returns ({{Method}}Resp) {
+    option (api.post) = "v1/{{pkg}}/{{path}}";
+    option (google.api.http) = { post: "/v1/{{pkg}}/{{path}}" body: "*" };
+    option (openapi.v3.operation) = { summary: "{{一句话说明}}" };
+  }
+}
+
+// ---- 3. 请求 / 响应：字段编号稳定，注释会变成生成代码的文档 ----
+message {{Method}}Req {
+  // {{字段说明}}
+  string name = 1;
+}
+
+message {{Method}}Resp {
+  // {{字段说明}}
+  string message = 1;
+}

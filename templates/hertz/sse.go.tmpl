@@ -1,0 +1,91 @@
+// 模板：Kitex server-streaming → Hertz SSE 的桥接。复制到 app/{{gw}}/biz/handler/{{pkg}}/sse.go 后替换 {{...}}。
+// 来源：fixtures/stream-sse/app/apigw/biz/handler/echo/sse.go
+//
+// 要点：
+//   - 这是 generated-code-boundary.md 登记的唯一例外；标记注释必须保留，检查脚本靠它识别
+//   - handler 里只改一处：把 JSON 收尾换成 writeSSEStream(c, stream)
+//   - Recv 的传输层错误也要变成 error 事件，客户端不能只看到连接被关闭
+//   - done / error 之后停止转发
+//   - 零值有意义的字段用显式 DTO 保留，protobuf 的 omitempty 会把 0 吃掉
+package {{pkg}}
+
+import (
+	"encoding/json"
+	"errors"
+	"io"
+
+	"{{rpcpkg}}" "{{module}}/rpc_gen/kitex_gen/{{rpcpkg}}"
+	"{{module}}/rpc_gen/kitex_gen/{{rpcpkg}}/{{service}}"
+
+	"github.com/cloudwego/hertz/pkg/app"
+	"github.com/cloudwego/hertz/pkg/protocol/consts"
+	"github.com/cloudwego/kitex/pkg/kerrors"
+	"github.com/hertz-contrib/sse"
+)
+
+// codeStreamInterrupted 传输层中断且无法映射为业务错误时，网关自己填的错误码。
+const codeStreamInterrupted = {{interruptedCode}}
+
+// cloudwego-skills: sse-bridge {{Method}} — registered exception, see references/generated-code-boundary.md
+//
+// writeSSEStream 把下游的流式事件编码为 SSE：event 名为事件类型，data 为事件 JSON。
+func writeSSEStream(c *app.RequestContext, stream {{service}}.{{Service}}_{{Method}}Client) {
+	c.SetStatusCode(consts.StatusOK)
+	c.Response.Header.Set("Content-Type", "text/event-stream")
+	c.Response.Header.Set("Cache-Control", "no-cache")
+	c.Response.Header.Set("Connection", "keep-alive")
+	c.Response.Header.Set("X-Accel-Buffering", "no")
+	sseStream := sse.NewStream(c)
+
+	for {
+		event, recvErr := stream.Recv()
+		if errors.Is(recvErr, io.EOF) {
+			break
+		}
+		if recvErr != nil {
+			code, message := int32(codeStreamInterrupted), "stream interrupted"
+			if bizErr, ok := kerrors.FromBizStatusError(recvErr); ok {
+				code, message = bizErr.BizStatusCode(), bizErr.BizMessage()
+			}
+			publish(sseStream, &{{rpcpkg}}.{{Method}}Resp{Type: "error", Code: code, Message: message})
+			break
+		}
+		if event == nil {
+			continue
+		}
+		if err := publish(sseStream, event); err != nil {
+			break
+		}
+		if event.Type == "done" || event.Type == "error" {
+			break
+		}
+	}
+	c.Flush()
+}
+
+func publish(stream *sse.Stream, event *{{rpcpkg}}.{{Method}}Resp) error {
+	data, err := marshalEvent(event)
+	if err != nil {
+		return err
+	}
+	return stream.Publish(&sse.Event{Event: event.Type, Data: data})
+}
+
+// deltaEvent 显式保留 partIndex=0；protobuf 生成的 omitempty 会丢掉首个分段下标。
+type deltaEvent struct {
+	Type      string `json:"type"`
+	ReplyID   string `json:"replyId"`
+	Seq       int64  `json:"seq"`
+	Text      string `json:"text"`
+	PartIndex int32  `json:"partIndex"`
+}
+
+func marshalEvent(event *{{rpcpkg}}.{{Method}}Resp) ([]byte, error) {
+	if event.GetType() != "delta" {
+		return json.Marshal(event)
+	}
+	return json.Marshal(deltaEvent{
+		Type: event.GetType(), ReplyID: event.GetReplyId(), Seq: event.GetSeq(),
+		Text: event.GetText(), PartIndex: event.GetPartIndex(),
+	})
+}

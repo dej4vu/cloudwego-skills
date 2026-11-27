@@ -1,0 +1,67 @@
+{
+  "skill_name": "cloudwego-skills",
+  "notes": [
+    "格式遵循 https://agentskills.io/skill-creation/evaluating-skills 。每个用例：prompt 是真实用户会说的话；expected_output 是人读的成功标准；assertions 是可客观核对的断言。",
+    "带 check 的断言由 evals/assertions.sh 机械判定（对 agent 产出的工作区跑 grep / go build）；不带 check 的留给人工复查。",
+    "每个用例跑两次：with_skill 与 without_skill（或上一版 skill 快照），同一 prompt、同一干净工作区、各自独立的会话。结果写入 skill 目录之外的工作区，见 references/testing-and-verification.md 的“验证本 skill”。"
+  ],
+  "evals": [
+    {
+      "id": 1,
+      "name": "add-gateway-endpoint",
+      "prompt": "帮我在 apigw 加一个查询订单详情的接口，路径 v1/order/detail/get，POST，要登录，入参只有 productId，返回 setting 和 enabled 两个字段。RPC 那边 OrderClient.GetOrderDetail 已经有了。",
+      "expected_output": "先改网关 IDL（三个注解齐全），重新生成后把 hz 追加的 handler 改成三分支委托形状，手写 service 从 mw.UserID 取身份、只 return error，并在路由中间件上挂登录校验；响应走统一信封而不是自己 c.JSON。",
+      "assertions": [
+        {"text": "网关 IDL 的新方法同时带 api.post、google.api.http、openapi.v3.operation 三个注解", "check": "idl_three_annotations"},
+        {"text": "请求消息里没有 accessToken 字段，身份不靠请求体传递", "check": "no_access_token_in_idl"},
+        {"text": "handler 的 BindAndValidate 失败分支调 SendBindErrorResponse，Run 失败分支调 SendErrResponse，成功调 SendSuccessResponse", "check": "handler_three_branches"},
+        {"text": "handler 里没有残留 hz 原生形状（c.String(consts.StatusBadRequest / c.JSON(consts.StatusOK）", "check": "no_native_hz_shape"},
+        {"text": "service 用 mw.UserID(s.RequestContext) 取身份，没有自己解析 token", "check": "service_uses_mw_userid"},
+        {"text": "service 只返回 error，没有 c.JSON 或自行决定状态码", "check": "service_returns_error_only"},
+        {"text": "登录校验挂在 _getorderdetailMw() 中间件上，而不是写在 service 里", "check": "middleware_wired"},
+        {"text": "工作区 go build 通过", "check": "build"},
+        {"text": "没有手改 hertz_gen/、router 主文件或 kitex_gen/ 等生成物（handler 的新方法除外）", "check": null}
+      ]
+    },
+    {
+      "id": 2,
+      "name": "add-cached-dao-method",
+      "prompt": "file 服务要按 id 批量取文件，读多写少，加个缓存呗，能容忍一两分钟陈旧。再顺手加个按 status 查列表的方法。",
+      "expected_output": "缓存读方法以 GetBy 开头并标 // cached、走 cacheRepo；列表方法用 ListBy 前缀直查 DB；执行器是官方 gorm.Interface[*model.File]，不新增 db *gorm.DB 字段，也不复活已删除的 gormx。",
+      "assertions": [
+        {"text": "走缓存的新方法以 GetBy 开头，且方法注释含 // cached", "check": "cached_method_named_getby"},
+        {"text": "走缓存的方法实现里用 cacheRepo，而不是直接查 DB", "check": "cached_method_uses_cacherepo"},
+        {"text": "按 status 查列表的方法用 ListBy / List 前缀且直查 d.g", "check": "list_method_direct"},
+        {"text": "没有新增 db *gorm.DB 字段，也没有使用 gormx.Interface / gormx.G", "check": "no_db_field_no_gormx"},
+        {"text": "新 DAO 文件一个文件只放一个 DAO", "check": null},
+        {"text": "没有为了“结构统一”给不需要缓存的 DAO 都塞缓存字段", "check": null}
+      ]
+    },
+    {
+      "id": 3,
+      "name": "kafka-consumer-idempotency",
+      "prompt": "queue 服务要新消费一个 topic，消息是订单已支付，收到后给用户加余额。这条链路不能重复加钱。",
+      "expected_output": "handler 只做反序列化→调领域 RPC→返回 error，业务在领域服务；消息带 request_id 作为幂等键，消费端按它去重或让加余额本身幂等；必然失败的消息用 kq.Permanent 包装，不靠错误文案判断；新 topic 在 handlerFactories 登记。",
+      "assertions": [
+        {"text": "消息结构含 request_id 字段，并作为消费端幂等键使用", "check": "request_id_idempotency"},
+        {"text": "handler 没有直接操作数据库，只调领域 RPC", "check": "handler_delegates_to_rpc"},
+        {"text": "没有用 strings.Contains(err.Error(), ...) 这类文案匹配判断错误类别", "check": "no_error_string_matching"},
+        {"text": "新 topic 在 handlerFactories 里登记", "check": "topic_registered"},
+        {"text": "必然失败的消息用 kq.Permanent 包装，而不是返回原始错误让它无限重试", "check": "uses_permanent"},
+        {"text": "没有在 handler 里把原始消息体或解析错误文本打进日志", "check": "no_raw_payload_logging"},
+        {"text": "幂等键的选取与去重时机在业务上正确（例如与加余额在同一事务内）", "check": null}
+      ]
+    },
+    {
+      "id": 4,
+      "name": "boundary-legacy-style-repo",
+      "prompt": "这个仓库的网关 handler 都长这样：err = c.BindAndValidate(&req); 失败就 utils.SendErrResponse(ctx, c, consts.StatusOK, err)。我照着加个新接口，也这样写行吗？",
+      "expected_output": "先识别出这是 cwgo 生成器原生的 handler 形态；指出绑定分支应与业务分支分开（看 Run 是否已调用，不看状态码），并把目标仓库自身约定置于本 skill 之上；不把主参考库的 responsex / protojson 强加到一个没有 hcommon 的仓库里。",
+      "assertions": [
+        {"text": "指出该形态下两个失败分支都走 SendErrResponse、都是 StatusOK，并说明绑定分支应如何区分", "check": null},
+        {"text": "没有把主参考库独有的 responsex / hcommon 当作所有仓库的硬性要求", "check": null},
+        {"text": "说明目标仓库的 AGENTS.md / Makefile 约定优先于本 skill", "check": null}
+      ]
+    }
+  ]
+}

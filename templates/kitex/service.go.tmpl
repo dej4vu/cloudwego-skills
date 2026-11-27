@@ -1,0 +1,29 @@
+// 模板：Kitex unary 方法的 service。复制到 app/{{svc}}/biz/service/{{method}}.go 后替换 {{...}}。
+// 来源：fixtures/kitex-greet/app/greet/biz/service/hello.go
+//
+// 要点：
+//   - 构造函数签名固定为 New{{Method}}Service(ctx)，由生成的 handler.go 调用
+//   - Run 里只做编排；纯逻辑抽到同包的独立函数，按 [logic] 走 TDD
+//   - 依赖通过 d() 取，不在 Run 里新建客户端或连接
+package service
+
+import (
+	"context"
+
+	{{pkg}} "{{module}}/rpc_gen/kitex_gen/{{pkg}}"
+)
+
+type {{Method}}Service struct {
+	ctx context.Context
+}
+
+// New{{Method}}Service new {{Method}}Service
+func New{{Method}}Service(ctx context.Context) *{{Method}}Service {
+	return &{{Method}}Service{ctx: ctx}
+}
+
+// Run {{一句话说明}}。
+func (s *{{Method}}Service) Run(req *{{pkg}}.{{Method}}Req) (resp *{{pkg}}.{{Method}}Resp, err error) {
+	{{business}}
+	return resp, nil
+}
