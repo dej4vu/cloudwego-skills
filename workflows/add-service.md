@@ -23,6 +23,8 @@ make gen-svc svc={svc}
 
 **完成条件**：`rpc_gen/kitex_gen/{svc}/` 与 `rpc_gen/rpc/{svc}/` 出现；`git status` 里只有这两个目录和 `rpc_gen/go.sum` 变化。
 
+`make gen-svc` 用仓库自带的 `templates/cwgo/kitex-server` 生成骨架，`main.go`、`conf/`、`biz/dal/`、`infra/rpc/client.go` 都是 `skip`（首次生成后归项目维护），`handler.go` 与 `biz/service/{method}.go` 是追加。
+
 ### 3. 生成服务骨架
 
 `make gen-svc` 通常已包含这一步。否则：
@@ -43,9 +45,14 @@ cd app/{svc} && cwgo server --type RPC --service {svc} --module <mod>/app/{svc} 
 
 ### 5. 集中装配依赖
 
-写 `biz/service/init.go`：`dependencies` 结构体、`d()`、`InitDeps()`、`ShutdownDeps()`。下游 client 用窄接口。
+写 `biz/service/init.go`。看仓库里同类服务用哪种形态，照着写：
 
-在 `main.go` 里按顺序调用：`dal.Init()` → `rpc.InitClient()` → `service.InitDeps()`，并把 `ShutdownDeps` 注册为 shutdown hook。
+- 依赖少、以 DAO 为主 → 包级变量（`var OrderDAO *dao.OrderDAO`），`InitDeps` 里逐个 `New`，首个依赖非空即视为重复初始化、直接 panic。
+- 依赖多、要把下游 client 注入 → `dependencies` 结构体 + `d()`，下游 client 用窄接口。
+
+两种都要有 `ShutdownDeps()`（有后台 worker 时停 worker）。
+
+在 `main.go` 里按顺序调用 `dal.Init()`、`rpc.InitClient()`、`service.InitDeps()`（包级变量形态通常是 `InitDeps` 在 `InitClient` 之前；`dependencies` 形态必须 `InitClient` 在前），并把 `ShutdownDeps` 注册为 shutdown hook。`svr.Run()` 失败 `os.Exit(1)`。
 
 **完成条件**：不调 `InitDeps` 直接调业务方法会 panic；调了之后正常。
 

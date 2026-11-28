@@ -77,6 +77,13 @@ hz update <同上参数>
 
 主参考库的 `make gen-gw` / `gen-admingw` 就是对每个 IDL 循环跑这条 `hz update`（admingw 多一个 `--proto_path ../../idl/apigw`）。
 
+仓库自带两套 cwgo 模板，`make gen-svc` 直接引用：
+
+- `templates/cwgo/kitex-server/`：服务骨架。生成的 `main.go` 已接 `common/serversuite`（Etcd 注册、trace）、zap 日志、lumberjack 轮转；`infra/rpc/client.go` 生成空壳 `InitClient()` 作扩展点。`main.go`、`conf/`、`dal/` 都是 `skip`，首次生成后归项目维护。
+- `templates/cwgo/kitex-client/`：`rpc_gen/rpc/{svc}` 包装。`init()` 里不建连、不硬编码地址，`DefaultClient()` 未初始化直接 panic，由 `infra/rpc/client.go` 显式装配。
+
+主参考库的 `kitex-client` 模板还是 `range .Imports` 的旧写法（见下文"两个硬伤"），依赖服务里同时有 unary 方法把 `context` 带进来。新增**纯流式**服务前先换成 [templates/cwgo/kitex-client](../templates/cwgo/kitex-client)。
+
 形态 A（对照库）的命令：
 
 ```bash
@@ -112,6 +119,8 @@ GOOGLEAPIS_DIR="$(go env GOPATH)/pkg/mod/github.com/grpc-ecosystem/grpc-gateway@
 3. **`git diff --stat`。** 预期只变 `idl/`、生成物、`{method}.go` 桩。出现其他文件先停下。
 4. **补齐 `.hz`。** 用 `hz new` 初始化后 `.hz` 要提交，否则别人无法 `hz update`。
 5. **网关 handler 的绑定分支。** 形态 A、B 生成的 handler 把绑定错误和业务错误都发给 `SendErrResponse`。按 [generated-code-boundary.md](generated-code-boundary.md) 的登记约定，把绑定分支改成 `SendBindErrorResponse`——这是允许手改生成物的第二个例外。`hz update` 和 `cwgo server` 重生成都会逐字节保留已有方法体，所以只需改一次。
+
+主参考库的 Makefile 在 `gen-gw` / `gen-admingw` 末尾用 perl 正则把绑定分支自动改写成 `utils.SendBindErrorResponse`。注意这条正则匹配的是 `utils.SendErrResponse`，而 handler 迁到 `hcommon/pkg/responsex` 后调用的是 `responsex.SendErrResponse`——**正则已匹配不到，不要再指望它**。生成后按 [generated-code-boundary.md](generated-code-boundary.md) 的"生成后检查"手动确认新方法。本 skill 不依赖 perl。
 
 ## cwgo 默认模板里要替换的占位
 

@@ -41,14 +41,27 @@ m_too_long()             { for i in $(seq 1 520); do echo "line $i"; done >> SKI
 m_broken_link()          { sed -i '' 's#(references/architecture.md)#(references/nope.md)#' SKILL.md; }
 m_broken_workflow_link() { sed -i '' 's#(workflows/add-rpc-method.md)#(workflows/missing.md)#' SKILL.md; }
 m_orphan_doc()           { grep -v 'troubleshooting.md' SKILL.md > SKILL.tmp && mv SKILL.tmp SKILL.md; }
-m_stale_gormx()          { sed -i '' 's#已删除，仓库用#推荐使用，仓库用#' references/data-and-cache.md; }
+# 过时表述守护的变异要打在"否定语境"的那一行上。行号会随文档编辑漂移，
+# 所以用 line_of 按内容定位：line_of <文件> <grep -F 片段>，找不到时让 sed 报错（run 会记为 SETUP FAILED）。
+# mutate_line <文件> <定位片段(grep -F)> <sed 替换表达式(不含行号)>
+# 只替换定位片段所在的那一行；找不到片段时返回非零，run 会记为 SETUP FAILED。
+mutate_line() {
+  local file="$1" anchor="$2" expr="$3" n
+  n="$(grep -n -F -- "$anchor" "$file" | head -1 | cut -d: -f1)"
+  if [ -z "$n" ]; then
+    printf 'mutate_line: %s 里找不到 %s\n' "$file" "$anchor" >&2
+    return 1
+  fi
+  sed -i '' "${n}${expr}" "$file"
+}
+m_stale_gormx()          { mutate_line references/data-and-cache.md '已删除，仓库用' 's#已删除，仓库用#推荐使用，仓库用#'; }
 m_stale_validate_session() {
-  sed -i '' '50s#这是未迁移完的遗留，新端点按#这是推荐写法，新端点按#' references/hertz-gateway.md
+  mutate_line references/hertz-gateway.md '这是未迁移完的遗留，新端点按' 's#这是未迁移完的遗留，新端点按#这是推荐写法，新端点按#'
 }
 m_stale_json() {
-  sed -i '' '34s#不带信封#不带信封。建议保留 c.JSON(consts.StatusOK, resp)#' workflows/add-http-endpoint.md
+  mutate_line workflows/add-http-endpoint.md '不带信封' 's#不带信封#不带信封。建议保留 c.JSON(consts.StatusOK, resp)#'
 }
-m_stale_utils_send()    { sed -i '' '30s#已迁到#仍在，推荐用#' references/troubleshooting.md; }
+m_stale_utils_send()    { mutate_line references/troubleshooting.md '已迁到' 's#已迁到#仍在，推荐用#'; }
 m_perl_call()           { echo 'perl -pi -e s/a/b/' >> scripts/check-toolchain.sh; }
 m_python_call()         { echo 'python3 scripts/x.py' >> scripts/check-toolchain.sh; }
 # 下面三条的样本在运行时拼出来：完整的字面量留在源码里，会被 check-skill.sh 的脱敏检查命中。

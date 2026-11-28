@@ -33,7 +33,7 @@ cwgo 上游已归档并推荐新用户用原生工具。两个参考库都基于
 
 | | 对照库 | 主参考库 |
 |---|---|---|
-| 响应编码 | `c.JSON` + `encoding/json` | `gwjson` + protojson（`EmitUnpopulated`） |
+| 响应编码 | `c.JSON` + `encoding/json` | `pbjson` + protojson（`EmitUnpopulated`） |
 | `int64` 字段 | 数字（JS 丢精度） | 字符串 |
 | 零值字段 | 取决于 `omitempty` | 保留 |
 | `timestamp` | 数字 | 字符串 |
@@ -63,6 +63,14 @@ Kitex `v0.16.3` 生成的流式 handler 不透传请求 ctx。这是生成器行
 ### 响应函数签名在两个网关间必须一致
 
 `apigw` 与 `admingw` 共用 `hcommon/pkg/responsex`。给 `responsex` 加参数或改签名时两个网关同时受影响，改完两个都要编译。
+
+### 网关配置包不能抽到 `hcommon`
+
+`hz` 生成的模板按 `<module>/conf` 引用配置包。主参考库曾把它抽成 `hcommon/pkg/confx`，`make gen-gw` 随即失败，又撤回各网关本地。网关配置包一律留在 `app/{gw}/conf/`。
+
+### 编码器的位置变过
+
+纯编码器最早在 `common/gwjson`，后来迁到 `hcommon/pkg/pbjson`。看到旧文档或旧提交里的 `gwjson`，对应现在的 `pbjson`；API 名字没变（`Get` / `Put` / `Success` / `Error` / `UnmarshalProto`）。
 
 ## 升级流程
 

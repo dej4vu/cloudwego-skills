@@ -53,7 +53,7 @@ func (s *WatchStreamService) Run(req *order.WatchReq, stream order.OrderService_
 
 ## 取依赖
 
-通过 `d()` 取，不在方法内构造：
+按服务现有形态取，不在方法内构造。编排型服务通过 `d()`：
 
 ```go
 // ✅
@@ -63,9 +63,11 @@ resp, err := d().inventoryClient.ReserveStock(s.ctx, req)
 client := inventory.NewInventoryClient(...)
 ```
 
+依赖少的服务用 `init.go` 里的包级变量（`service.OrderDAO`、`service.OrderStore`），规则同样是不在方法内构造。两种形态见 [architecture.md](architecture.md) 的"两种并存的形态"，**先 `ls` 目标服务的 `init.go` 看它用哪种，照着写，不要迁移**。
+
 ## 下游 client 用窄接口 `[主]`
 
-`init.go` 里为每个下游声明只含本服务用到方法的接口，把生成的 client 赋进去：
+编排型服务在 `init.go` 里为每个下游声明只含本服务用到方法的接口，把生成的 client 赋进去；依赖少的服务直接用 `rpc.XxxClient`，不必为了形式统一补接口：
 
 ```go
 type inventoryClient interface {
@@ -78,6 +80,8 @@ type riskClient interface {
 ```
 
 接口签名与生成 client 的方法签名一致，`rpc.InventoryClient` 可以直接赋值。好处是 service 只依赖它用到的面，换实现或写测试时不必 mock 整个 client。
+
+接口不只为 RPC client 声明：同一个 DAO 在不同链路上用到的面也可以拆成两个窄接口（如"对话历史读取"与"轮次写入"指向同一个 DAO），便于单测注入。
 
 ## 下游 client 装配 `[主]`
 
@@ -140,12 +144,14 @@ gopool.Go(worker.Run)
 func main() {
     opts := kitexInit()
     dal.Init()
-    rpc.InitClient()
     service.InitDeps()
+    rpc.InitClient()
     svr := orderservice.NewServer(new(OrderServiceImpl), opts...)
     server.RegisterShutdownHook(func() { service.ShutdownDeps() })
     if err := svr.Run(); err != nil { klog.Error(err.Error()) }
 }
 ```
 
-`InitDeps` 在接收请求前完成；`ShutdownDeps` 注册为 shutdown hook，先停 worker 再关连接。
+硬约束只有一条：`InitDeps` 在接收请求前完成，`ShutdownDeps` 注册为 shutdown hook，先停 worker 再关连接。`rpc.InitClient()` 与 `service.InitDeps()` 的先后**按服务现状**：主参考库多数服务是 `dal.Init → InitDeps → InitClient`（`InitDeps` 不依赖下游 client），对话、记忆两个服务反过来（它们的 `InitDeps` 要把 client 装进 `dependencies`，必须先 `InitClient`）。改一个服务时看它 `main.go` 现在的顺序，不要调换。
+
+日志用 Kitex 的 zap 适配器（`kitex-contrib/obs-opentelemetry/logging/zap`）写轮转文件，`BufferedWriteSyncer` 每秒 flush；shutdown hook 里先 `Sync()` 再 `ShutdownDeps()`。`svr.Run()` 失败要 `os.Exit(1)`，让编排系统感知启动失败。

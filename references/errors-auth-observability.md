@@ -39,17 +39,29 @@ enum Err {
 | `23xxx` | 用户 | `UserInvalidArgument = 23001` |
 | `24xxx` | 文件 | `FileInvalidArgument = 24001` |
 | `25xxx` | 风控 | `RiskInvalidArgument = 25001` |
-| `26xxx` | 计费支付 ||| `26xxx` | 支付 | `PaymentInvalidArgument = 26001` |
-| `27xxx` | 订单 | `OrderInvalidArgument = 27001` |
-| `28xxx` | 商品 | `ProductInvalidArgument = 28001` |
-| `29xxx` | 库存 | `InventoryInvalidArgument = 29001` |
+| `26xxx` | 计费（支付 + 充值 + 钱包） | `BillingInvalidArgument = 26001` |
+| `27xxx` | 对话 | `DialogueInvalidArgument = 27001` |
+| `28xxx` | 角色 | `CharacterInvalidArgument = 28001` |
+| `29xxx` | 记忆 | `MemoryInvalidArgument = 29001` |
 | `30xxx` | 管理员 | `AdminInvalidArgument = 30001` |
 
 约定：
 
 - 通用码在 `10000` 段，业务码不要往里加。
 - 每个域第一个码是该域的参数错误（`{Domain}InvalidArgument`），之后是领域特有错误。
+- 段的划分以**服务**为单位，不以业务对象为单位：支付、充值、钱包同属计费服务，共用 `26xxx`，不另开段。
 - 新增错误码只追加，不复用、不重排。
+
+每个域里几个有代表性的码，写业务时直接用，不要再造同义码：
+
+| 码 | 用途 |
+|---|---|
+| `Err_UserTokenInvalid`（23005） | 用户端登录态无效；网关 `apigw` 的认证中间件失败固定回它 |
+| `Err_AdminTokenInvalid`（30002） | 管理端登录态无效；`admingw` 认证中间件失败固定回它 |
+| `Err_BillingPaymentStatusConflict`（26003）/ `Err_BillingRechargeStatusConflict`（26008） | 支付 / 充值订单状态机不允许的迁移（重复回调、乱序） |
+| `Err_DialogueContentRejected`（27007） | 对话内容被风控拒绝 |
+| `Err_CharacterDraftConflict`（28003）/ `Err_CharacterNameConflict`（28004） | 角色草稿版本冲突 / 名称重复 |
+| `Err_MemoryStatusConflict`（29003） | 记忆状态不允许的迁移 |
 
 ## RPC 侧怎么返回错误 `[主]`
 
@@ -133,7 +145,8 @@ func RequestID(c *app.RequestContext) string {
 
 - 客户端带了 `X-Request-Id` 且合法就沿用；否则生成 `uuid.NewString()`。合法 = 非空、长度 ≤ 64、只含 `[A-Za-z0-9-_.]`。
 - 中间件把最终 ID 回写**请求头与响应头**，所以 `RequestID(c)` 直接读请求头即可；没经过中间件的路径也按同一规则兜底。
-- 访问日志同一行带 request id、method、path、query、IP、UA、状态码、耗时和脱敏后的请求/响应体，所有网关请求自动有这一行，业务代码不用再打入口日志。
+- 访问日志同一行带 request id、状态码、耗时、method、path、query、IP、**IP 归属地**（`ipLocation=`）、UA、`platform` / `deviceId` / `appVersion`、`ctype` 和脱敏后的请求/响应体，所有网关请求自动有这一行，业务代码不用再打入口日志。
+- 归属地由 `iplocator.Location(ip)` 查离线库得到，查不到填"未知"；访问日志**不再**输出 `X-Forwarded-For`（`xff=`）——客户端 IP 统一由 `mw.ClientIP` 解析，日志只记解析结果。
 
 RPC 请求消息里声明 `string requestId = 1;`，网关填入，各服务透传给下游。所有跨服务的日志靠它串联。
 

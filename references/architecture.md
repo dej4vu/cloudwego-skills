@@ -17,8 +17,8 @@
 │   ├── admingw/          管理端 HTTP 契约
 │   └── errno/            错误码
 ├── rpc_gen/              Kitex 生成物 + cwgo 客户端包装（禁止编辑）
-├── common/               RPC 侧公共库（cachex、gormx、gwjson、mq、queue/kq、redislock、ratelimit …）— 禁止引入 Hertz
-├── hcommon/              网关公共库（pkg/responsex、pkg/mw、pkg/confx）— 仅 apigw / admingw 使用
+├── common/               RPC 侧公共库（cachex、gormx、iplocator、logx、mq、queue/kq、redislock、ratelimit …）— 禁止引入 Hertz
+├── hcommon/              网关公共库（pkg/pbjson、pkg/responsex、pkg/mw）— 仅 apigw / admingw 使用
 └── templates/cwgo/       cwgo 自定义模板
 ```
 
@@ -53,8 +53,9 @@ app/{service}/
 
 ```text
 app/apigw/
-├── main.go                        rpc.InitClient → server.New(WithBindConfig) → 中间件 → 路由
+├── main.go                        rpc.InitClient → iplocator.Init → server.New(WithBindConfig) → 中间件 → 路由
 ├── router.go                      customizedRegister：非 IDL 路由（支付回调、ping）
+├── conf/conf.go                   ✅ 网关本地配置包（GetConf / GetEnv / LogLevel）
 ├── biz/handler/{pkg}/             🚫 生成，流式桥接除外
 ├── biz/router/{pkg}/              🚫 生成；middleware.go 是用户扩展点
 ├── biz/service/{method}.go        ✅ 认证后的编排 + pack + 调 RPC
@@ -65,7 +66,11 @@ app/apigw/
 └── infra/rpc/client.go            ✅
 ```
 
-响应信封、请求 ID、访问日志、客户端 IP、CORS 都在 `hcommon/`，网关里不再有 `biz/utils/`。配置加载用 `hcommon/pkg/confx`（`GO_ENV` → `conf/<env>/conf.yaml`）。
+响应信封、protojson 编解码、请求 ID、访问日志、客户端 IP、CORS 都在 `hcommon/`，网关里不再有 `biz/utils/`。
+
+**网关配置包必须留在各网关本地 `app/{apigw,admingw}/conf/`，不要抽到 `hcommon`。** `hz` 生成的代码按 `<module>/conf` 这个固定路径引用配置包，抽走会让 `make gen-gw` 失败。配置加载规则是 `GO_ENV` → `conf/<env>/conf.yaml`，`GO_ENV` 为空时默认 `test`；`os.ExpandEnv` 展开 `${VAR}`，再用 `validator` 校验必填项。网关的 `conf.go` 同时提供 `GetConf()` 与 `LogLevel()`，启动时 `hlog.SetLevel(conf.LogLevel())`。
+
+IP 归属地库（`common/iplocator`）在网关 `main` 里用配置的 `ip2region.db_path` 初始化；初始化失败只打 WARN，访问日志里的 `ipLocation` 降级为"未知"，不阻塞启动。
 
 ## 职责边界 `[主]`
 
@@ -138,6 +143,17 @@ func ShutdownDeps() { /* ... */ }
 
 详见 [kitex-service.md](kitex-service.md)。
 
+### 两种并存的形态 `[主]`
+
+主参考库里两种写法都存在，**都以服务现状为准，不要互相迁移**：
+
+| 形态 | 用在 | 写法 |
+|---|---|---|
+| `dependencies` + `d()` | 依赖多、有窄接口要注入的编排型服务（对话、记忆） | `d().memoryDAO.…`、`d().characterClient.…` |
+| 包级变量 | 依赖少、DAO 为主的服务（用户、短信、文件、风控、计费、管理员、角色） | `service.UserDAO.…`、`service.PaymentStore.…` |
+
+两种都要满足三条：全部集中在 `init.go`；`InitDeps` 只允许调一次，重复调用直接 panic；后台 worker（outbox、定时关单）在 `ShutdownDeps` 里停掉。包级变量形态下 `InitDeps` 用首个依赖非空判断重复初始化，`ShutdownDeps` 把 worker 变量置回 `nil`。
+
 ## 公共演进：网关公共库 `[主]`
 
 两个仓库都有独立 module `hcommon/`，`common/` 保持零 Hertz 依赖——这条边界是共有的。差别在网关自己还剩多少公共代码：
@@ -145,9 +161,11 @@ func ShutdownDeps() { /* ... */ }
 | | 对照库 `hcommon/` | 网关里剩下的 |
 |---|---|---|
 | 对照库 | `accesslogx`、`corsx`、`encodingx`、`errorx`、`signx` | `biz/utils/{resp,reqctx,scene}.go`：响应信封仍在网关内 |
-| 主参考库 | `responsex`、`mw`、`confx` | 无 `biz/utils/`；`biz/mw/auth.go` 只剩身份模型相关的部分 |
+| 主参考库 | `pbjson`、`responsex`、`mw` | 无 `biz/utils/`；`biz/mw/auth.go` 只剩身份模型相关的部分 |
 
 主参考库把响应信封也抽了出去，因为信封的 wire 契约（protojson、字符串 timestamp）和绑定配置是 `apigw` / `admingw` 必须完全一致的，留在各自网关里迟早漂移。新仓库从一开始就按主参考库的划分放代码。
+
+主参考库曾把网关配置也抽成 `hcommon/pkg/confx`，后来因为 `hz` 生成依赖 `<module>/conf` 路径又撤回各网关本地。**配置包是例外，不要合并。** `common/gwjson`（纯编码器）后来也迁成了 `hcommon/pkg/pbjson`：它虽不 import Hertz，但只服务网关的 HTTP wire 语义，放在 `hcommon` 边界更清楚。
 
 ## 与对照库的差异
 

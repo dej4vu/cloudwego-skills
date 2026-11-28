@@ -26,7 +26,7 @@ Go 单仓多服务，Kitex RPC + Hertz HTTP，Protobuf IDL。服务数量与主�
 | 流式 | 无 SSE | server-streaming + SSE | 主参考库 |
 | 异步一致性 | 直接发 Kafka | outbox | 主参考库 |
 | 响应信封位置 | 各网关 `biz/utils/resp.go` | `hcommon/pkg/responsex` | 主参考库 |
-| 响应编码 | `c.JSON`（`encoding/json`） | protojson（`gwjson`） | 主参考库 |
+| 响应编码 | `c.JSON`（`encoding/json`） | protojson（`pbjson`） | 主参考库 |
 | `timestamp` | 数字 | 字符串 | 跟仓库，不要中途改 |
 | 错误分类 | 类型化错误 + 错误文案关键词匹配（`timeout`、`connection`…） | 按分支选入口，不看文案 | 主参考库 |
 | 请求绑定 | Hertz 默认解码器 | protojson（`BindConfig`） | 主参考库 |

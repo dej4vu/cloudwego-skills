@@ -52,6 +52,8 @@ func d() *dependencies {
 
 **收益**：启动即 fail-fast；方法文件只剩编排；窄接口让测试不必 mock 整个 client。
 
+仓库里依赖少的服务后来没有跟进 `dependencies` 聚合，直接在 `init.go` 用包级变量。两种形态都满足"集中装配 + 只初始化一次"，所以并存，不互相迁移。
+
 ## 演进 2：SSE 流式返回
 
 **问题**：处理结果是逐步产生的，unary 响应要么等完（延迟高）要么得分片轮询。
@@ -102,7 +104,7 @@ outbox 是已落库业务事件的唯一发布路径。
 
 **做法**：三层各管一件事。
 
-1. **`common/gwjson`**：纯编码器。信封 wire 契约固定为 `{code, msg, data, timestamp}`，`data` 走 protojson（`int64` → 字符串，零值保留，`EmitUnpopulated`），`timestamp` 也输出字符串；`Encoder` 走 `sync.Pool`。
+1. **`hcommon/pkg/pbjson`**（最初在 `common/gwjson`，后迁入）：纯编码器。信封 wire 契约固定为 `{code, msg, data, timestamp}`，`data` 走 protojson（`int64` → 字符串，零值保留，`EmitUnpopulated`），`timestamp` 也输出字符串；`Encoder` 走 `sync.Pool`。
 2. **`hcommon/pkg/responsex`**：三个入口按**分支**分类而不是按文案猜——`SendBindErrorResponse` 只给 `BindAndValidate` 失败，`SendErrResponse` 只给业务分支。业务错误原样透传，其余一律"服务繁忙"。
 3. **`responsex.BindConfig`**：请求绑定也走 protojson，`int64` 同时接受字符串与数字，未知字段忽略。
 
@@ -120,6 +122,8 @@ responsex.SendSuccessResponse(ctx, c, consts.StatusOK, resp)
 ```
 
 **收益**：前端拿到稳定的 JSON 形态；绑定错误不再被报成"服务繁忙"；不再有靠错误文案猜分类的脆弱逻辑。
+
+同一轮还把网关配置包从 `hcommon/pkg/confx` 撤回了各网关本地：`hz` 生成的模板按固定路径引用 `<module>/conf`，抽走后 `make gen-gw` 直接失败。这是"公共库该抽什么"的反例——**被生成器按路径引用的包不能动**。
 
 ## 演进 6：Kafka 封装 `kq`
 

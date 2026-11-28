@@ -23,7 +23,7 @@ metadata:
 | 不确定某文件能否手改；流式 handler 需要桥接 | [generated-code-boundary.md](references/generated-code-boundary.md) |
 | 改 `.proto`、加 RPC 方法、加网关注解、字段兼容 | [idl-contracts.md](references/idl-contracts.md) |
 | 写 `biz/service/*.go`、依赖装配、RPC 错误与上下文 | [kitex-service.md](references/kitex-service.md) |
-| 写网关 service、pack、认证中间件、响应信封（`responsex` / `gwjson`）、protojson 绑定 | [hertz-gateway.md](references/hertz-gateway.md) |
+| 写网关 service、pack、认证中间件、响应信封（`responsex` / `pbjson`）、protojson 绑定 | [hertz-gateway.md](references/hertz-gateway.md) |
 | DAO、GORM 官方泛型、`cachex` 缓存协作、not-found 语义、表归属 | [data-and-cache.md](references/data-and-cache.md) |
 | Kafka（`kq` 生产者 / 消费者 / DLQ）、outbox、消费幂等、支付回调幂等、锁与限流 | [async-and-idempotency.md](references/async-and-idempotency.md) |
 | Kitex server-streaming 到 Hertz SSE 的全链路 | [streaming-sse.md](references/streaming-sse.md) |

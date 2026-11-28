@@ -18,6 +18,8 @@
 | `main.go` 引用了不存在的 `kitex-contrib/obs-opentelemetry/logging/logrus` | cwgo 默认 server 模板的占位 | `main.go` 由项目维护，替换成自己的启动代码 |
 | struct tag 里仍有 `omitempty`，但期望零值字段保留 | `--unset_omitempty=true` 没经 `--pass` 透传给 hz（cwgo 自身没有这个参数） | 写成 `cwgo server --pass --unset_omitempty=true ...` |
 | 新生成的 handler 里没有 service 调用，直接 `c.JSON` | `hz update` 追加的新方法用的是 hz 原生模板 | 按 [add-http-endpoint.md](../workflows/add-http-endpoint.md) 步骤 3 改成委托形状并手写 service |
+| 新生成的方法绑定分支仍是 `SendErrResponse` | Makefile 里的 perl 正则只匹配旧的 `utils.` 包前缀，handler 已改用 `responsex.`，正则失效 | 手改这一处为 `responsex.SendBindErrorResponse`，见 [generated-code-boundary.md](generated-code-boundary.md) |
+| `hz update` 报找不到 `<module>/conf` 配置包 | 配置包被抽到了 `hcommon` | 配置包留在 `app/{gw}/conf/`，`hz` 按固定路径引用它 |
 | 生成后运行期 `proto: file google/api/http.proto is already registered` | cwgo 生成的占位 pb 与其他链路带入的真实 `genproto` 重复注册 | 删掉 `.pb.go` 里指向 `hertz_gen/{github.com,google.golang.org}` 的 blank import，再删这两个占位目录 |
 | 网关生成后 `biz/utils/resp.go` 又出现了 | cwgo 路径每次生成都产出这个桩 | 网关已用 `hcommon/pkg/responsex` 时删掉它，否则两套响应函数并存 |
 | `check-proto` 报某字段宽度不符 | `int32` / `int64` 选错 | 按 [idl-contracts.md](idl-contracts.md) 的判定表改；有存储依据的登记到 `WHITELIST` |
@@ -43,11 +45,12 @@
 | `InitDeps` panic 重复初始化 | `InitDeps` 被调了两次 | 只在 `main` 调一次 |
 | 传了非法 JSON，响应却是"服务繁忙，请稍后再试" | 绑定分支调的是 `SendErrResponse`，绑定错误是无类型错误，被当成非业务错误兜底 | handler 绑定分支改用 `SendBindErrorResponse`；检查 `grep -n 'SendErrResponse' app/apigw/biz/handler/*/*_service.go` 里紧跟 `BindAndValidate` 的那几处 |
 | 明明是参数错误，返回的却是"服务繁忙"且 `code=10000` | 同上 | 同上 |
-| 响应里 `int64` 变成了字符串 | protojson 规范，`gwjson` 有意为之 | 前端按字符串 / `BigInt` 处理；不要为了"看起来像数字"改回 `c.JSON` |
+| 响应里 `int64` 变成了字符串 | protojson 规范，`pbjson` 有意为之 | 前端按字符串 / `BigInt` 处理；不要为了"看起来像数字"改回 `c.JSON` |
 | 前端传 `"id": "123"`（字符串）报参数错误 | 请求绑定没走 protojson | `server.New` 加 `server.WithBindConfig(responsex.BindConfig())` |
 | 前端多传了一个字段就报错 | 同上（protojson 默认 `DiscardUnknown`） | 同上 |
 | 响应头里没有 `X-Request-Id` | 没挂 `mw.NewAccessLog()` | `h.Use(mw.NewAccessLog()...)`，且要在 `register` 之前 |
 | 日志里访问日志没有请求体 | `logx.FormatJSONPayload` 只对 JSON 内容类型格式化，且超长截断（请求 2048、响应 512） | 正常现象；需要完整 body 时在业务日志里自己打，注意不要打用户正文 |
+| 访问日志里 `ipLocation=未知` | `iplocator.Init` 失败（`ip2region.db_path` 没配或文件不存在），只打了 WARN | 配置 `ip2region.db_path` 指向离线库；不影响请求处理 |
 | 网关日志里出现重复的入口日志 | `mw.NewAccessLog()` 已经打了一行，业务里又手写了一份 | 删掉业务里手写的入口日志 |
 | 读到旧数据 | 写后没失效缓存 | 写成功后 `InvalidateCache` |
 | 缓存里没有，DB 里也没有，但接口返回"参数不合法" | DAO 用了 `IgnoreNotFound`，把"必须存在"吞成了 `nil, nil` | 必存在查询用 `gormx.WrapNotFound`，service 把 `Err_RecordNotFound` 映射成领域错误 |
@@ -61,7 +64,7 @@
 | 请求路径偶发卡 15 秒 | 同步 `Push` 遇到 broker 故障，`MaxAttempts × WriteTimeout` 是上界 | 业务事件仍用同步；埋点类用 `WithAsyncPush` |
 | 日志里找不到关联请求 | 没用 `Ctx` 系列方法 | 用 `klog.CtxErrorf` / `hlog.CtxErrorf`；request id 由 `mw.NewAccessLog()` 自动回写响应头 |
 | 服务起来了但下游调不通 | client 用了默认 `127.0.0.1:8888` | 在 `infra/rpc/client.go` 用服务发现显式装配 |
-| 配置文件找不到，`panic` 读 `conf/<env>/conf.yaml` | `GO_ENV` 没设或设错 | `confx` 默认 `test`，按部署环境设 `GO_ENV` |
+| 配置文件找不到，`panic` 读 `conf/<env>/conf.yaml` | `GO_ENV` 没设或设错 | 网关本地 `conf` 包默认 `test`，按部署环境设 `GO_ENV` |
 
 ## 如何定位
 

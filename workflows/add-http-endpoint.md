@@ -60,6 +60,8 @@ grep -n 'c.String(consts.StatusBadRequest' app/apigw/biz/handler/*/*_service.go
 grep -n 'c.JSON(consts.StatusOK' app/apigw/biz/handler/*/*_service.go
 ```
 
+**c. 确认绑定分支**：`hz update` 追加的新方法把绑定错误也发给 `SendErrResponse`，仓库 Makefile 里的 perl 正则只匹配旧的 `utils.` 前缀，对 `responsex.` 不生效。新方法的手改要同时完成"委托形状"和"`BindAndValidate` 失败调 `SendBindErrorResponse`"两件事（上面的代码块已是最终形状）。
+
 > 形态差异：cwgo 路径（对照库）生成的 handler 本来就委托 service，并自带空桩 `biz/service/{method}.go`，但两个失败分支都是 `StatusOK`、都调 `SendErrResponse`，同样要把绑定分支改成 `SendBindErrorResponse`；区分两个分支看 `Run` 是否已调用，不要按状态码找。原生 `hz new` 的仓库（形态 C）没有 service 层，整个 handler 按上面的形状手写。
 
 **完成条件**：`biz/handler/{pkg}/{pkg}_service.go` 多了方法且已是委托形状；`biz/router/{pkg}/{pkg}.go` 多了路由；`biz/router/{pkg}/middleware.go` 多了 `_{method}Mw()` 桩；`hertz_gen/gw/{pkg}/` 更新；已有方法未被改动。
@@ -99,6 +101,10 @@ func (s *GetOrderDetailService) Run(req *gworder.GetOrderDetailReq) (*gworder.Ge
 
 service 只返回 error，不构造响应。身份从 `mw.UserID` 取，不在 `Run` 里解析 token。需要 request id 用 `hmw.RequestID(s.RequestContext)`。
 
+`req == nil` 或必填字段为空时返回 `errno.NewBizError(errno.Err_Params, "请求参数不完整")`；`userId <= 0` 返回 `Err_UserTokenInvalid`。RPC 失败时 `hlog.CtxErrorf` 带上 request id 与关键参数，再把 `err` 原样返回，由 handler 的 `SendErrResponse` 决定响应。
+
+把调用方环境传给下游时用 `support.go` 的 `clientInfo(c)`（IP、`deviceId`、`platform`、`appVersion`、`deviceModel`、`registerSource` 头）。
+
 **完成条件**：`make build svc=apigw` 通过。
 
 ### 5. pack
@@ -129,6 +135,6 @@ func _getorderdetailMw() []app.HandlerFunc {
 | 参数错误 | 发非法 JSON 或类型不符的字段 | `Err_Params` + "请求参数不合法" |
 | 下游故障 | 停掉 RPC 服务 | `Err_Params` + "服务繁忙，请稍后再试"，日志里有原始错误 |
 
-响应头里应有 `X-Request-Id`。
+响应头里应有 `X-Request-Id`。访问日志那一行应有 `ipLocation=`，且**不含** `xff=`。
 
 **完成条件**：五种情况响应形状一致。
